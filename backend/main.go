@@ -174,28 +174,8 @@ func authorize(next http.Handler) http.Handler {
     })
 }
 
-// Create a new PDF
-func createPDF(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-    // Your PDF creation code here
-    pdf, err := unipdf.New()
-    if err!= nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
 
-}
 
-// Update an existing PDF
-func updatePDF(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-    pdfID := ps.ByName("pdfID")
-    // Your PDF update code here
-    pdf, err := unipdf.New()
-    if err!= nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-
-}
 
 // Show PDFs with sorting and filters
 func showPDFs(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
