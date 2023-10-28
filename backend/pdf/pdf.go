@@ -2,10 +2,14 @@ package pdf
 
 
 import (
-	"encoding/json"
+    "encoding/json"
     "fmt"
     "net/http"
-    "strings"
+    "strconv"
+
+    "github.com/julienschmidt/httprouter"
+    "github.com/pkg/errors"
+    "github.com/unidoc/unipdf/v3"
 )
 
 ype Document struct {
@@ -19,7 +23,7 @@ ype Document struct {
 func createPDF(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
     // Your PDF creation code here
     pdf := unipdf.NewPdf()
-	pdf.AppendPage()
+    pdf.AppendPage()
 
     pdfBytes, err := pdf.Bytes()
     if err != nil {
@@ -27,36 +31,55 @@ func createPDF(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
         return
     }
 
-	w.Header().Set("Content-Type", "application/pdf")
+    w.Header().Set("Content-Type", "application/pdf")
     w.Header().Set("Content-Disposition", "inline; filename=output.pdf")
-    w.Header().Set("Content-Length", strconv.Itoa(len(pdfBytes)))
+    w.Header().Set("Content-Length", strconv.Itoa(len(pdfBytes))
     _, err = w.Write(pdfBytes)
     if err != nil {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
-
-	}
+    }
 }
 
 func updatePDF(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
     pdfID := ps.ByName("pdfID")
-	//Find an existing PDF by pdfID. Implement PDF search logic in your system.
-	
-
-	pdf := unipdf.NewPdf()
-    pdf.AppendPage()
-	// Implement the code to search for PDF in your system.
-	if unipdf == nil {
-        // PDF не найден, возвращаем ошибку
-        http.Error(w, "PDF не найден", http.StatusNotFound)
+    // Find an existing PDF by pdfID. Implement PDF search logic in your system.
+    foundPDF, err := findPDFByID(pdfID)
+    if err != nil {
+        // Handle the error when searching for a PDF
+        http.Error(w, "An error occurred while searching for a PDF", http.StatusInternalServerError)
         return
     }
-	// Update your PDF data. At this point you need to
+    if foundPDF == nil {
+        // PDF not found, return an error
+        http.Error(w, "PDF not found", http.StatusNotFound)
+        return
+    }
+    // Update your PDF data. At this point, you need to
 
-	err := savePDF(uniPDF)
+    err = savePDF(foundPDF)
     if err != nil {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
+    w.WriteHeader(http.StatusOK)
+    fmt.Fprint(w, "PDF updated successfully")
+}
 
+func findPDFByID(pdfID string) ([]byte, error) {
+    // Получаем коллекцию PDF-документов
+    collection := client.Database("pdfsdb").Collection("pdfs")
+
+    // Поиск PDF по его идентификатору
+    filter := bson.M{"_id": pdfID}
+    var pdf Document
+
+    if err := collection.FindOne(context.TODO(), filter).Decode(&pdf); err != nil {
+        if err == mongo.ErrNoDocuments {
+            return nil, errors.New("PDF не найден")
+        }
+        return nil, err
+    }
+
+    return pdf.Content, nil
 }

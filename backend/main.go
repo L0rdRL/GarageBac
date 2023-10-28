@@ -18,6 +18,12 @@ type User struct {
     Role       string `json:"role"`
 }
 
+type ServerConfig struct {
+    Address      string `json:"address"`
+    Port         int    `json:"port"`
+    MongoDBURI   string `json:"mongodb_uri"`
+
+}
 
 type Document struct {
     Link    string `json:"link"`
@@ -200,8 +206,69 @@ func deletePDF(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 
 }
 
+func loadConfig() ServerConfig {
+    configFile, err := os.Open("config.json")
+    if err != nil {
+        return ServerConfig{
+            Address:    "localhost",
+            Port:       8080,
+            MongoDBURI: "mongodb://localhost:27017",
+            // Другие значения по умолчанию
+        }
+    }
+    defer configFile.Close()
+
+    decoder := json.NewDecoder(configFile)
+    var config ServerConfig
+    err = decoder.Decode(&config)
+    if err != nil {
+        log.Printf("Ошибка разбора файла конфигурации: %v. Использую значения по умолчанию.", err)
+        return ServerConfig{
+            Address:    "localhost",
+            Port:       8080,
+            MongoDBURI: "mongodb://localhost:27017",
+            // Другие значения по умолчанию
+        }
+    }
+
+    return config
+}
+
+func saveConfig(config ServerConfig) error {
+    configFile, err := os.Create("config.json")
+    if err != nil {
+        return err
+    }
+    defer configFile.Close()
+
+    encoder := json.NewEncoder(configFile)
+    if err := encoder.Encode(config); err != nil {
+        return err
+    }
+
+    return nil
+}
+
+
+// Где-то в вашем коде, когда вы хотите сохранить конфигурацию
+config := loadConfig() // Загрузка текущей конфигурации
+config.Address = "new_address"
+config.Port = 8081
+config.MongoDBURI = "new_mongodb_uri"
+
+if err := saveConfig(config); err != nil {
+    log.Printf("Ошибка сохранения конфигурации: %v", err)
+}
+
+
+
+
 func main() {
     router := httprouter.New()
+
+    // Создаем канал для ожидания сигналов завершения работы сервера
+    c := make(chan os.Signal, 1)
+    signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
     // Routes for PDF operations
     router.POST("/pdfs", createPDF)
@@ -210,8 +277,35 @@ func main() {
     router.DELETE("/pdfs/:pdfID", deletePDF)
 
     // Start the server
-    fmt.Println("Server started on :8080")
-    http.ListenAndServe(":8080", authorize(router))
+    // Устанавливаем соединение с MongoDB
+	// Устанавливаем соединение с MongoDB
+    clientOptions := options.Client().ApplyURI("mongodb+srv://arcklitrl:101899Aeza@cl1.uapna8x.mongodb.net")
+    client, err := mongo.Connect(context.TODO(), clientOptions)
+    if err != nil {
+        log.Fatalf("Ошибка при подключении к MongoDB: %v", err)
+        return
+    }
+    defer client.Disconnect(context.TODO())
+
+    // Создаем базу данных и коллекцию
+    db := client.Database("pdfsdb")
+    collection := db.Collection("pdfs")
+
+    fmt.Println("База данных и коллекция успешно созданы.")
+
+    // Запускаем сервер в горутине
+    go func() {
+        fmt.Println("Server started on :8080")
+        http.ListenAndServe(":8080", authorize(router))
+    }()
+
+    // Ожидание сигнала завершения работы сервера
+    <-c
+
+    // Закрытие базы данных и другие необходимые действия для корректного завершения
+    client.Disconnect(context.TODO())
+    fmt.Println("Сервер завершает работу.")
+    os.Exit(0)
 }
 
 // Create a new document
