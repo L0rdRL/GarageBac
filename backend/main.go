@@ -6,6 +6,8 @@ import (
     "github.com/julienschmidt/httprouter"
     "github.com/dgrijalva/jwt-go"
     "github.com/unidoc/unipdf/v3"
+    "github.com/L0rdRL/p1/handlers"
+    "github.com/L0rdRL/p1/pdf"
 )
 
 type User struct {
@@ -101,8 +103,8 @@ func authenticate(next http.Handler) http.Handler {
     })
 }
 
-router.POST("/documents", authenticate(createDocument))
-router.PUT("/documents/:documentID", authenticate(updateDocument))
+router.POST("/documents", handlers.CreateDocumentHandler)
+router.PUT("/documents/:documentID", handlers.UpdateDocumentHandler)
 router.DELETE("/documents/:documentID", authenticate(deleteDocument))
 
 
