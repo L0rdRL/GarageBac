@@ -8,6 +8,9 @@ import (
     "github.com/unidoc/unipdf/v3"
     "github.com/L0rdRL/p1/handlers"
     "github.com/L0rdRL/p1/pdf"
+    "net/smtp"
+    "math/rand"
+
 )
 
 type User struct {
@@ -55,57 +58,112 @@ var userDB []User = []User{
 
 }
 
-// User registration
-func registerUser(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-    var newUser User
-    err := json.NewDecoder(r.Body).Decode(&newUser)
-    if err != nil {
-        http.Error(w, "Invalid request", http.StatusBadRequest)
+
+
+
+// User authentication middleware
+func loginUser(w http.ResponseWriter, r *http.Request) {
+    // Получить логин и пароль из запроса
+    username := r.FormValue("username")
+    password := r.FormValue("password")
+
+    // Найдите пользователя в вашей базе данных по имени пользователя
+    user := findUserByUsername(username)
+
+    if user == nil || !comparePasswords(user.Password, password) {
+        http.Error(w, "Неверный логин или пароль", http.StatusUnauthorized)
         return
     }
 
-    // Hash and salt the password (you should use a proper library for this)
+    // Если пользователь существует и пароль совпадает, выдайте ему JWT-токен
+    token := generateToken(user.Username)
+
+    // Отправьте токен обратно пользователю
+    w.WriteHeader(http.StatusOK)
+    w.Header().Set("Content-Type", "application/json")
+    response := map[string]string{"token": token}
+    json.NewEncoder(w).Encode(response)
+}
+
+func registerUser(w http.ResponseWriter, r *http.Request) {
+    // Получить данные пользователя из запроса
+    var newUser User
+    err := json.NewDecoder(r.Body).Decode(&newUser)
+    if err != nil {
+        http.Error(w, "Неверный запрос", http.StatusBadRequest)
+        return
+    }
+
+    // Проверьте, существует ли пользователь с таким же именем
+    if findUserByUsername(newUser.Username) != nil {
+        http.Error(w, "Пользователь с таким именем уже существует", http.StatusConflict)
+        return
+    }
+
+    // Хэшируйте пароль
     hashedPassword := hashAndSaltPassword(newUser.Password)
 
-    // Store the user information in the database
+    // Сохраните данные пользователя в базе данных
     newUser.Password = hashedPassword
     userDB = append(userDB, newUser)
 
-    // Respond with success message
+    // Ответьте успехом
     w.WriteHeader(http.StatusCreated)
-    fmt.Fprint(w, "User registered successfully")
+    fmt.Fprint(w, "Пользователь зарегистрирован успешно")
 }
 
-// User authentication middleware
-func authenticate(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        tokenString := r.Header.Get("Authorization")
-        if tokenString == "" {
-            http.Error(w, "Unauthorized", http.StatusUnauthorized)
-            return
-        }
+func generateActivationCode() string {
+    const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*-№;%:?*()_+=.,"
+    code := make([]byte, 16)
+    for i := range code {
+        code[i] = charset[rand.Intn(len(charset))]
+    }
+    return string(code)
+}
 
-        // Verify the username and password (you should use a proper library for this)
-        username, password := extractUsernamePassword(tokenString)
-        user := findUserByUsername(username)
+func sendActivationEmail(userEmail, activationCode string) {
+    // Настройки SMTP сервера
+    smtpServer := "smtp.example.com"
+    smtpPort := "587"
+    senderEmail := "your-email@example.com"
+    senderPassword := "your-email-password"
 
-        if user == nil || !comparePasswords(user.Password, password) {
-            http.Error(w, "Unauthorized", http.StatusUnauthorized)
-            return
-        }
+    // Формирование письма
+    subject := "Подтверждение регистрации"
+    body := fmt.Sprintf("Для завершения регистрации перейдите по ссылке: http://your-website.com/activate?code=%s", activationCode)
 
-        if user.Role != "admin" {
-            http.Error(w, "Access Denied", http.StatusForbidden)
-            return
-        }
+    message := []byte("To: " + userEmail + "\r\n" +
+        "Subject: " + subject + "\r\n" +
+        "\r\n" +
+        body + "\r\n")
 
-        next.ServeHTTP(w, r)
+    // Отправка письма
+    auth := smtp.PlainAuth("", senderEmail, senderPassword, smtpServer)
+    err := smtp.SendMail(smtpServer+":"+smtpPort, auth, senderEmail, []string{userEmail}, message)
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+
+func generateToken(userID string) (string, error) {
+    // Создайте токен с данными о пользователе
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+        "user_id": userID,
+        // Здесь вы можете добавить другие данные о пользователе
     })
+
+    // Подпишите токен с использованием секретного ключа
+    tokenString, err := token.SignedString([]byte("ваш_секретный_ключ"))
+    if err != nil {
+        return "", err
+    }
+
+    return tokenString, nil
 }
 
 router.POST("/documents", handlers.CreateDocumentHandler)
 router.PUT("/documents/:documentID", handlers.UpdateDocumentHandler)
-router.DELETE("/documents/:documentID", authenticate(deleteDocument))
+router.DELETE("/documents/:documentID", handlers.DeleteDocument)
 
 
 func extractUsernamePassword(tokenString string) (string, string) {
@@ -184,30 +242,6 @@ func authorize(next http.Handler) http.Handler {
 
 
 
-
-// Show PDFs with sorting and filters
-func showPDFs(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-    // Your PDF listing code here
-    pdf, err := unipdf.New()
-    if err!= nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-
-}
-
-// Delete a PDF
-func deletePDF(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-    pdfID := ps.ByName("pdfID")
-    // Your PDF deletion code here
-    pdf, err := unipdf.New()
-    if err!= nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-
-}
-
 func loadConfig() ServerConfig {
     configFile, err := os.Open("config.json")
     if err != nil {
@@ -266,6 +300,10 @@ if err := saveConfig(config); err != nil {
 
 
 func main() {
+    activationCode := generateActivationCode()
+    userEmail := "user@example.com"
+
+    sendActivationEmail(userEmail, activationCode)
     router := httprouter.New()
 
     // Создаем канал для ожидания сигналов завершения работы сервера
@@ -309,71 +347,3 @@ func main() {
     fmt.Println("Сервер завершает работу.")
     os.Exit(0)
 }
-
-// Create a new document
-func createDocument(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-    var newDoc Document
-    err := json.NewDecoder(r.Body).Decode(&newDoc)
-    if err != nil {
-        http.Error(w, "Invalid request", http.StatusBadRequest)
-        return
-    }
-
-    // Store the document information in the database
-    documentDB = append(documentDB, newDoc)
-
-    // Respond with success message
-    w.WriteHeader(http.StatusCreated)
-    fmt.Fprint(w, "Document created successfully")
-}
-
-// Update an existing document
-func updateDocument(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-    documentID := ps.ByName("documentID")
-    // Find the document by ID and update its information
-    for i, doc := range documentDB {
-        if doc.Link == documentID {
-            documentDB[i].Link = newDoc.Link
-            documentDB[i].Status = newDoc.Status
-            documentDB[i].Type = newDoc.Type
-            break
-        }
-    }
-
-    // Implement your update logic here
-    w.WriteHeader(http.StatusOK)
-    fmt.Fprint(w, "Document updated successfully")
-
-}
-
-// List documents with sorting and filters
-func listDocuments(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-    // Implement your document listing code with sorting and filters here
-    document, err := unipdf.New()
-    if err!= nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-
-}
-
-// Delete a document
-func deleteDocument(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-    documentID := ps.ByName("documentID")
-    // Delete the specified document
-    for i, doc := range documentDB {
-        if doc.Link == documentID {
-            documentDB = append(documentDB[:i], documentDB[i+1:]...)
-            break
-        }
-    }    
-
-    // Implement your document deletion logic here
-    w.WriteHeader(http.StatusOK)
-    fmt.Fprint(w, "Document deleted successfully")
-}
-
-router.POST("/documents", createDocument)
-router.PUT("/documents/:documentID", updateDocument)
-router.GET("/documents", listDocuments)
-router.DELETE("/documents/:documentID", deleteDocument)

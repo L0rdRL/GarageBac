@@ -86,3 +86,18 @@ func ListDocumentsHandler(w http.ResponseWriter, r *http.Request, _ httprouter.P
 	}
 	json.NewEncoder(w).Encode(documents)
 }
+
+func DeleteDocument(w http.ResponseWriter, r *http.Request, ps httprouter.Params){
+	documentID := ps.ByName("documentID")
+
+	for i, doc := range documentsDB {
+		if doc.ID == documentID {
+			documentsDB = append(documentsDB[:i], documentsDB[i+1:]...)
+            w.WriteHeader(http.StatusOK)
+            w.Write([]byte("Document deleted successfully"))
+            return
+		}
+	}
+	http.Error(w, "Document not found", http.StatusNotFound)
+}
+
