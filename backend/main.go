@@ -10,6 +10,7 @@ import (
     "github.com/L0rdRL/p1/pdf"
     "net/smtp"
     "math/rand"
+    "encoding/json"
 
 )
 
